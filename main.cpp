@@ -2,30 +2,30 @@
 #include <IRremote.h>
 #include <EEPROM.h>
 
-const unsigned long MY_MUTE = 0xffb24d;
-const unsigned long MY_MAXVOL = 0xff6897;
-const unsigned long MY_VOLUP = 0xff7887;
-const unsigned long MY_VOLDWN = 0xff50af;
-const unsigned long MY_REC = 0xff32cd;
-const unsigned long MY_BURST = 0xffffffff;
-const unsigned long MY_9 = 0xffe817;
-const unsigned long MY_8 = 0xffa857;
-const unsigned long MY_7 = 0xff8877;
+const unsigned long BTN_MUTE = 0xffb24d;
+const unsigned long BTN_MAXVOL = 0xff6897;
+const unsigned long BTN_VOLUP = 0xff7887;
+const unsigned long BTN_VOLDWN = 0xff50af;
+const unsigned long BTN_REC = 0xff32cd;
+const unsigned long BTN_BURST = 0xffffffff;
+const unsigned long BTN_9 = 0xffe817;
+const unsigned long BTN_8 = 0xffa857;
+const unsigned long BTN_7 = 0xff8877;
 
-#define IR_RECV_PIN 11
-#define INC_PIN_L 9
-#define INC_PIN_R 7
-#define UD_PIN 8
-#define BURST_SLEEP_MUS 3
+#define PIN_IR_RECV 11
+#define PIN_POT_INC_L 9
+#define PIN_POT_INC_R 7
+#define PIN_POT_UD 8
+
+#define NEG_EDGE_SLEEP_MUS 3
 #define POT_STEPS 105
 #define VOL_STEPS 39
-#define UNINTILAIZED_EEPROM 0xff
-#define DEFULT_VOL_STEP 20
-
+#define VOL_STEP_DEFAULT 20
+#define VOL_RIGHT_OFFSET_ZERO 100
+#define EEPROM_DEFAULT 0xff
 #define EEPROM_VOLUME_IDX 0
 #define EEPROM_RIGHT_OFFSET_IDX 1
 
-#define RIGHT_OFFSET_ZERO 100
 
 #define MY_SERIAL_OUT
 
@@ -37,14 +37,14 @@ const unsigned long MY_7 = 0xff8877;
 #define SERIALOUT2(x,y)
 #endif
 
-IRrecv irrecv(IR_RECV_PIN);
+IRrecv irrecv(PIN_IR_RECV);
 decode_results results;
 unsigned long g_lastIrCode;
 uint8_t g_volIdx;
 uint8_t g_rightOffset;
 
 
-uint8_t logResValues[VOL_STEPS] = 
+uint8_t logResValuesKOhms[VOL_STEPS] = 
 {
 100,99,98,97,96,95,94,93,92,91,
 90,89,88,87,86,85,84,83,82,81,
@@ -53,28 +53,28 @@ uint8_t logResValues[VOL_STEPS] =
 };
 
 
-void saveVolInEeprom()
+void storeVolToEeprom()
 {
   SERIALOUT("eeprom save");
   EEPROM.write(EEPROM_VOLUME_IDX, g_volIdx);
   EEPROM.write(EEPROM_RIGHT_OFFSET_IDX, g_rightOffset);
 }
 
-void loadVolFromEeprom()
+void restoreVolFromEeprom()
 {
   SERIALOUT("eeprom load");
   g_volIdx = EEPROM.read(EEPROM_VOLUME_IDX);
   g_rightOffset = EEPROM.read(EEPROM_RIGHT_OFFSET_IDX);
 
-  if(g_volIdx == UNINTILAIZED_EEPROM)
-    g_volIdx = DEFULT_VOL_STEP;
-  if(g_rightOffset == EEPROM_RIGHT_OFFSET_IDX)
-    g_rightOffset = RIGHT_OFFSET_ZERO;
+  if(g_volIdx == EEPROM_DEFAULT)
+    g_volIdx = VOL_STEP_DEFAULT;
+  if(g_rightOffset == EEPROM_DEFAULT)
+    g_rightOffset = VOL_RIGHT_OFFSET_ZERO;
 }
 
 uint8_t calculateRightOffsetIdx(uint8_t leftIdx)
 {
-  int offset = g_rightOffset - RIGHT_OFFSET_ZERO;
+  int offset = g_rightOffset - VOL_RIGHT_OFFSET_ZERO;
   int rightIdx = leftIdx - offset;
   
   if(rightIdx < 0) rightIdx = 0;
@@ -88,27 +88,26 @@ void setVolume(uint8_t resistance, uint8_t pin)
     for(uint8_t idx = 0; idx < resistance; idx++)
     {
       digitalWrite(pin, LOW);
-      delayMicroseconds(BURST_SLEEP_MUS);
+      delayMicroseconds(NEG_EDGE_SLEEP_MUS);
       digitalWrite(pin, HIGH);
-      delayMicroseconds(BURST_SLEEP_MUS);
+      delayMicroseconds(NEG_EDGE_SLEEP_MUS);
     }
 }
 
 void setVolumeZero()
 {
   SERIALOUT("setVolumeZero");
-  digitalWrite(UD_PIN, HIGH); 
-  setVolume(logResValues[0], INC_PIN_L);
-  setVolume(logResValues[0], INC_PIN_R);
+  digitalWrite(PIN_POT_UD, HIGH); 
+  setVolume(POT_STEPS, PIN_POT_INC_L);
+  setVolume(POT_STEPS, PIN_POT_INC_R);
 }
 
 void setVolumeMax()
 {
   SERIALOUT("setVolumeMax");
-  g_volIdx = VOL_STEPS;
-  digitalWrite(UD_PIN, LOW); 
-  setVolume(logResValues[0], INC_PIN_L);
-  setVolume(logResValues[0], INC_PIN_R);
+  digitalWrite(PIN_POT_UD, LOW); 
+  setVolume(POT_STEPS, PIN_POT_INC_L);
+  setVolume(POT_STEPS, PIN_POT_INC_R);
 }
 
 void setVolume(uint8_t volIdx)
@@ -118,13 +117,13 @@ void setVolume(uint8_t volIdx)
 
   if(volIdx < VOL_STEPS)
   {
-    uint8_t resistanceL = logResValues[volIdx];
-    uint8_t resistanceR = logResValues[calculateRightOffsetIdx(volIdx)];
+    uint8_t resistanceL = logResValuesKOhms[volIdx];
+    uint8_t resistanceR = logResValuesKOhms[calculateRightOffsetIdx(volIdx)];
     setVolumeZero();
     
-    digitalWrite(UD_PIN, LOW); 
-    setVolume(100 - resistanceL, INC_PIN_L);
-    setVolume(100 - resistanceR, INC_PIN_R);
+    digitalWrite(PIN_POT_UD, LOW); 
+    setVolume(100 - resistanceL, PIN_POT_INC_L);
+    setVolume(100 - resistanceR, PIN_POT_INC_R);
   }
 }
 
@@ -158,12 +157,13 @@ void OnMute()
 
 void OnMax()
 {
+  g_volIdx = VOL_STEPS;
   setVolumeMax();
 }
 
 void OnRecord()
 {
-  saveVolInEeprom();
+  storeVolToEeprom();
 }
 
 void OnRightOffsetUp()
@@ -176,7 +176,7 @@ void OnRightOffsetUp()
 
 void OnRightOffsetZero()
 {
-  g_rightOffset = RIGHT_OFFSET_ZERO;
+  g_rightOffset = VOL_RIGHT_OFFSET_ZERO;
   SERIALOUT("OnRightOffsetZero");
 }
 
@@ -189,66 +189,65 @@ void OnRightOffsetDown()
 
 void setup()
 {
-  #ifdef SERIAL
+  #ifdef MY_SERIAL_OUT
   Serial.begin(9600);
   #endif
-  irrecv.enableIRIn(); // Start the receiver
+  irrecv.enableIRIn();
 
-  pinMode(INC_PIN_L, OUTPUT);
-  pinMode(INC_PIN_R, OUTPUT);
-  pinMode(UD_PIN, OUTPUT);
-  digitalWrite(INC_PIN_L, HIGH); 
-  digitalWrite(INC_PIN_R, HIGH); 
-  digitalWrite(UD_PIN, HIGH); 
-  loadVolFromEeprom();
+  pinMode(PIN_POT_INC_L, OUTPUT);
+  pinMode(PIN_POT_INC_R, OUTPUT);
+  pinMode(PIN_POT_UD, OUTPUT);
+  digitalWrite(PIN_POT_INC_L, HIGH); 
+  digitalWrite(PIN_POT_INC_R, HIGH); 
+  digitalWrite(PIN_POT_UD, HIGH); 
+  restoreVolFromEeprom();
   setVolume(g_volIdx);
 }
 
 void loop() {
   if (irrecv.decode(&results)) {
-    Serial.println(results.value, HEX);
-    
+    SERIALOUT2(results.value, HEX);
     switch (results.value)
     {
-    case MY_MUTE:
+    case BTN_MUTE:
       g_lastIrCode = 0;
       OnMute();
       break;
-    case MY_VOLUP:
+    case BTN_VOLUP:
       g_lastIrCode = results.value;
       OnVolUp();
       break;
-    case MY_VOLDWN:
+    case BTN_VOLDWN:
       g_lastIrCode = results.value;
       OnVolDown();
       break;
-    case MY_MAXVOL:  
+    case BTN_MAXVOL:  
       g_lastIrCode = 0;
       OnMax();
       break;
-    case MY_REC:  
+    case BTN_REC:  
       g_lastIrCode = 0;
       OnRecord();
       break; 
-    case MY_9:  
+    case BTN_9:  
       g_lastIrCode = 0;
       OnRightOffsetUp();
       break;              
-    case MY_7:  
+    case BTN_7:  
       g_lastIrCode = 0;
       OnRightOffsetDown();
       break;
-    case MY_8:  
+    case BTN_8:  
       g_lastIrCode = 0;
       OnRightOffsetZero();
       break;                
-    case MY_BURST:
+    case BTN_BURST:
       switch (g_lastIrCode)
       {
-        case MY_VOLUP:
+        case BTN_VOLUP:
           OnVolUp();
           break;
-        case MY_VOLDWN:
+        case BTN_VOLDWN:
           OnVolDown();
           break;
       }
@@ -256,7 +255,7 @@ void loop() {
     default:
       break;
     }
-    irrecv.resume(); // Receive the next value
+    irrecv.resume();
   }
   delay(100);
 }
