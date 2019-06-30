@@ -14,8 +14,8 @@ const unsigned long BTN_7 = 0xff8877;
 
 #define PIN_IR_RECV 11
 #define PIN_POT_INC_L 9
-#define PIN_POT_INC_R 7
-#define PIN_POT_UD 8
+#define PIN_POT_INC_R 8
+#define PIN_POT_UD_LR 10
 
 #define NEG_EDGE_SLEEP_MUS 3
 #define POT_STEPS 105
@@ -26,10 +26,9 @@ const unsigned long BTN_7 = 0xff8877;
 #define EEPROM_VOLUME_IDX 0
 #define EEPROM_RIGHT_OFFSET_IDX 1
 
+#define ENABLE_SERIAL_OUT
 
-#define MY_SERIAL_OUT
-
-#ifdef MY_SERIAL_OUT 
+#ifdef ENABLE_SERIAL_OUT 
 #define SERIALOUT(x) Serial.println(x);
 #define SERIALOUT2(x,y) Serial.println(x,y);
 #else
@@ -37,14 +36,14 @@ const unsigned long BTN_7 = 0xff8877;
 #define SERIALOUT2(x,y)
 #endif
 
-IRrecv irrecv(PIN_IR_RECV);
-decode_results results;
+IRrecv g_irrecv(PIN_IR_RECV);
+decode_results g_irResults;
 unsigned long g_lastIrCode;
 uint8_t g_volIdx;
 uint8_t g_rightOffset;
 
 
-uint8_t logResValuesKOhms[VOL_STEPS] = 
+const uint8_t g_logResValuesKOhms[VOL_STEPS] = 
 {
 100,99,98,97,96,95,94,93,92,91,
 90,89,88,87,86,85,84,83,82,81,
@@ -58,6 +57,8 @@ void storeVolToEeprom()
   SERIALOUT("eeprom save");
   EEPROM.write(EEPROM_VOLUME_IDX, g_volIdx);
   EEPROM.write(EEPROM_RIGHT_OFFSET_IDX, g_rightOffset);
+  SERIALOUT2(g_volIdx, DEC);
+  SERIALOUT2(g_rightOffset, DEC);
 }
 
 void restoreVolFromEeprom()
@@ -70,17 +71,21 @@ void restoreVolFromEeprom()
     g_volIdx = VOL_STEP_DEFAULT;
   if(g_rightOffset == EEPROM_DEFAULT)
     g_rightOffset = VOL_RIGHT_OFFSET_ZERO;
+
+  SERIALOUT2(g_volIdx, DEC);
+  SERIALOUT2(g_rightOffset, DEC);
 }
 
 uint8_t calculateRightOffsetIdx(uint8_t leftIdx)
 {
+  SERIALOUT("calculateRightOffsetIdx");
+  SERIALOUT2(leftIdx, DEC);
   int offset = g_rightOffset - VOL_RIGHT_OFFSET_ZERO;
   int rightIdx = leftIdx - offset;
-  
-  if(rightIdx < 0) rightIdx = 0;
-  if(rightIdx > VOL_STEPS) rightIdx = VOL_STEPS;
-  
-  return rightIdx;
+
+  int res = max(0,min(rightIdx, VOL_STEPS));
+  SERIALOUT2(res, DEC);
+  return res;
 }
 
 void setVolume(uint8_t resistance, uint8_t pin)
@@ -97,7 +102,7 @@ void setVolume(uint8_t resistance, uint8_t pin)
 void setVolumeZero()
 {
   SERIALOUT("setVolumeZero");
-  digitalWrite(PIN_POT_UD, HIGH); 
+  digitalWrite(PIN_POT_UD_LR, HIGH); 
   setVolume(POT_STEPS, PIN_POT_INC_L);
   setVolume(POT_STEPS, PIN_POT_INC_R);
 }
@@ -105,7 +110,7 @@ void setVolumeZero()
 void setVolumeMax()
 {
   SERIALOUT("setVolumeMax");
-  digitalWrite(PIN_POT_UD, LOW); 
+  digitalWrite(PIN_POT_UD_LR, LOW); 
   setVolume(POT_STEPS, PIN_POT_INC_L);
   setVolume(POT_STEPS, PIN_POT_INC_R);
 }
@@ -117,11 +122,11 @@ void setVolume(uint8_t volIdx)
 
   if(volIdx < VOL_STEPS)
   {
-    uint8_t resistanceL = logResValuesKOhms[volIdx];
-    uint8_t resistanceR = logResValuesKOhms[calculateRightOffsetIdx(volIdx)];
+    uint8_t resistanceL = g_logResValuesKOhms[volIdx];
+    uint8_t resistanceR = g_logResValuesKOhms[calculateRightOffsetIdx(volIdx)];
     setVolumeZero();
     
-    digitalWrite(PIN_POT_UD, LOW); 
+    digitalWrite(PIN_POT_UD_LR, LOW); 
     setVolume(100 - resistanceL, PIN_POT_INC_L);
     setVolume(100 - resistanceR, PIN_POT_INC_R);
   }
@@ -169,6 +174,7 @@ void OnRecord()
 void OnRightOffsetUp()
 {
   g_rightOffset++;
+  setVolume(g_volIdx);
   SERIALOUT("OnRightOffsetUp");
   SERIALOUT2(g_rightOffset, DEC);
 
@@ -177,48 +183,52 @@ void OnRightOffsetUp()
 void OnRightOffsetZero()
 {
   g_rightOffset = VOL_RIGHT_OFFSET_ZERO;
+  setVolume(g_volIdx);
   SERIALOUT("OnRightOffsetZero");
 }
 
 void OnRightOffsetDown()
 {
   g_rightOffset--;
+  setVolume(g_volIdx);
   SERIALOUT("OnRightOffsetDown");
   SERIALOUT2(g_rightOffset, DEC);
 }
 
 void setup()
 {
-  #ifdef MY_SERIAL_OUT
+  #ifdef ENABLE_SERIAL_OUT
   Serial.begin(9600);
   #endif
-  irrecv.enableIRIn();
+  g_irrecv.enableIRIn();
 
   pinMode(PIN_POT_INC_L, OUTPUT);
   pinMode(PIN_POT_INC_R, OUTPUT);
-  pinMode(PIN_POT_UD, OUTPUT);
+  pinMode(PIN_POT_UD_LR, OUTPUT);
   digitalWrite(PIN_POT_INC_L, HIGH); 
   digitalWrite(PIN_POT_INC_R, HIGH); 
-  digitalWrite(PIN_POT_UD, HIGH); 
+  digitalWrite(PIN_POT_UD_LR, HIGH); 
   restoreVolFromEeprom();
   setVolume(g_volIdx);
 }
 
-void loop() {
-  if (irrecv.decode(&results)) {
-    SERIALOUT2(results.value, HEX);
-    switch (results.value)
+void loop() 
+{
+  if (g_irrecv.decode(&g_irResults)) 
+  {
+    SERIALOUT2(g_irResults.value, HEX);
+    switch (g_irResults.value)
     {
     case BTN_MUTE:
       g_lastIrCode = 0;
       OnMute();
       break;
     case BTN_VOLUP:
-      g_lastIrCode = results.value;
+      g_lastIrCode = g_irResults.value;
       OnVolUp();
       break;
     case BTN_VOLDWN:
-      g_lastIrCode = results.value;
+      g_lastIrCode = g_irResults.value;
       OnVolDown();
       break;
     case BTN_MAXVOL:  
@@ -255,7 +265,7 @@ void loop() {
     default:
       break;
     }
-    irrecv.resume();
+    g_irrecv.resume();
   }
   delay(100);
 }
